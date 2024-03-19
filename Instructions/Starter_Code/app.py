@@ -1,137 +1,122 @@
 # Import the dependencies.
-import numpy as np
+import os
 import datetime as dt
-import pandas as pd
-import sqlalchemy
+from flask import Flask, jsonify
+from sqlalchemy import create_engine, func
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, func
-from flask import Flask, jsonify
 
 #################################################
 # Database Setup
 #################################################
 
-engine = create_engine("sqlite:///hawaii.sqlite")
+# Create engine using the `hawaii.sqlite` database file
+db_path = '/Users/maia/Desktop/NU-VIRT-DATA-PT-10-2023-U-LOLC/02-Homework/10-Advanced-SQL/Instructions/Starter_Code/Resources/hawaii.sqlite'
+if os.path.exists(db_path):
+    engine = create_engine("sqlite:///" + db_path)
+else:
+    raise FileNotFoundError("SQLite file does not exist.")
 
-# reflect an existing database into a new model
+# Reflect an existing database into a new model
 Base = automap_base()
 
-# reflect the tables
-Base.prepare(autoload_with=engine)
+# Reflect the tables
+Base.prepare(engine, reflect=True)
 
 # Save references to each table
-measurement = Base.classes['measurement']
-station = Base.classes["station"]
-# Create our session (link) from Python to the DB
-session = Session(engine)
+Measurement = Base.classes.measurement
+Station = Base.classes.station
 
 #################################################
 # Flask Setup
 #################################################
 app = Flask(__name__)
 
-# #################################################
-# # Flask Routes
-# #################################################
+#################################################
+# Flask Routes
+#################################################
+
+# Home page with all available API routes
 @app.route("/")
-def homepage():
-    """List all available API route"""
+def welcome():
+    """List all available API routes."""
     return (
         f"Available Routes:<br/>"
-        f"/api/v1.0/precipitation<br/>"
-        f"/api/v1.0/stations<br/>"
-        f"/api/v1.0/tobs<br/>"
-        f"/api/v1.0/start<br/>"
-        f"/api/v1.0/start/end"
+        f"/api/v1.0/precipitation | Returns jsonified precipitation (in) data for the last year<br/>"
+        f"/api/v1.0/stations | Returns jsonified list of stations<br/>"
+        f"/api/v1.0/tobs | Returns jsonified temp (F) data for the last year<br/>"
+        f"/api/v1.0/<start> | Returns min, max, and avg temp (F) after the given start date. Format: yyyy-mm-dd<br/>"
+        f"/api/v1.0/<start>/<end> | Returns min, max, and avg temp (F) for the given date range. Format: yyyy-mm-dd/yyyy-mm-dd"
     )
 
-# precipitation
+# Page with precipitation data
 @app.route("/api/v1.0/precipitation")
-def precipitation():
-    session=Session(engine)
-
-    year_ago = dt.date(2017, 8, 23) - dt.timedelta(days=365)
-    precip = session.query(measurement.date, measurement.prcp).\
-        filter(measurement.date > year_ago).\
-        order_by(measurement.date).all()
-    session.close()
-
-    precip = []
-    for prcp, date in precip:
-        precipitation_dict = {}
-        precipitation_dict["precipitation"] = prcp
-        precipitation_dict["date"] = date
-        precip.append(precipitation_dict)
-
-    return jsonify(dict(precip))
-
-# #stations
-@app.route("/api/v1.0/stations")
-def stations():
-    session=Session(engine)
-
-    active_station = session.query(measurement.station,func.count(measurement.station)).\
-        group_by(measurement.station).\
-        order_by(func.count(measurement.station).desc()).all()
-    session.close()
-
-    station_list = list(np.ravel(active_station))
-
-    return jsonify(station_list)
-
-# # observed temp
-@app.route("/api/v1.0/tobs")
-def tobs():
-    session=Session(engine)
-
-    year_ago = dt.date(2017, 8, 23) - dt.timedelta(days=365)
-    first_station_data = session.query(measurement.tobs, measurement.date).\
-        filter(measurement.station=='USC00519281', measurement.date >= year_ago).\
-        order_by(measurement.tobs).all()
-    session.close()
-
-    station1_list = list(np.ravel(first_station_data))
-    return jsonify(station1_list)
-
-# start
-@app.route("/api/v1.0/start")
-def temps():
-    session=Session(engine)
-
-    # start = dt.date(2017, 1, 1)
-    start = dt.date(2017, 8, 23) - dt.timedelta(days=365)
-    start_query = session.query(func.min(measurement.tobs), func.max(measurement.tobs), func.avg(measurement.tobs)).\
-        filter(measurement.date >= start).all()
-    session.close()
-
-    # start_query = []
-    tempobs={}
-    tempobs["min"]=start_query[0][0]
-    tempobs["max"]=start_query[0][1]
-    tempobs["avg"]=start_query[0][2]
-
-    return jsonify(tempobs)
-
-# end
-@app.route("/api/v1.0/start/end")
-def year_data():
+def prcpdata():
+    """Return a list of all precipitation data for the last year"""
     session = Session(engine)
-
-    start = dt.date(2016, 10, 23)
-    end = dt.date(2017, 8, 23)
-    first_station_data = session.query(func.min(measurement.tobs), func.max(measurement.tobs), func.avg(measurement.tobs)).\
-        filter(measurement.station=='USC00519281', measurement.date > start, measurement.date < end).\
-        order_by(measurement.tobs).all()
-
+    results = session.query(Measurement.date, Measurement.prcp).\
+                      filter(Measurement.date >= dt.date(2016, 8, 23)).\
+                      order_by(Measurement.date).all()
     session.close()
 
-    tempobs={}
-    tempobs["min"]=first_station_data[0][0]
-    tempobs["max"]=first_station_data[0][1]
-    tempobs["avg"]=first_station_data[0][2]
-    
-    return jsonify(tempobs)
+    prcp_data = [{"date": date, "precipitation": prcp} for date, prcp in results]
+    return jsonify(prcp_data)
 
+# Page with station data
+@app.route("/api/v1.0/stations")
+def stationinfo():
+    """Return a list of all station data"""
+    session = Session(engine)
+    results = session.query(Station.station, Station.id).all()
+    session.close()
+
+    station_data = [{"station": station, "id": station_id} for station, station_id in results]
+    return jsonify(station_data)
+
+# Page with temperature data
+@app.route("/api/v1.0/tobs")
+def tobsdata():
+    """Return a list of all temperature data for the last year"""
+    session = Session(engine)
+    results = session.query(Measurement.date, Measurement.tobs).\
+                           filter(Measurement.date >= dt.date(2016, 8, 23)).\
+                           order_by(Measurement.date).all()
+    session.close()
+
+    tobs_data = [{"date": date, "temperature": tobs} for date, tobs in results]
+    return jsonify(tobs_data)
+
+# Page for finding temperature data after the given start date
+@app.route("/api/v1.0/<start>")
+def startinfo(start):
+    """Return a list of the temperature statistics after the provided date"""
+    session = Session(engine)
+    temperature_stats = session.query(func.min(Measurement.tobs), func.max(Measurement.tobs), func.avg(Measurement.tobs)).\
+                                filter(Measurement.date >= start).all()
+    session.close()
+
+    if temperature_stats:
+        min_temp, max_temp, avg_temp = temperature_stats[0]
+        return jsonify({"start_date": start, "min_temperature": min_temp, "max_temperature": max_temp, "avg_temperature": avg_temp})
+    else:
+        return jsonify({"error": "No temperature data found for the provided date."}), 404
+
+# Page for finding temperature data between the given dates
+@app.route("/api/v1.0/<start>/<end>")
+def startendinfo(start, end):
+    """Return a list of the temperature statistics between the provided dates"""
+    session = Session(engine)
+    temperature_stats = session.query(func.min(Measurement.tobs), func.max(Measurement.tobs), func.avg(Measurement.tobs)).\
+                                filter(Measurement.date >= start).\
+                                filter(Measurement.date <= end).all()
+    session.close()
+
+    if temperature_stats:
+        min_temp, max_temp, avg_temp = temperature_stats[0]
+        return jsonify({"start_date": start, "end_date": end, "min_temperature": min_temp, "max_temperature": max_temp, "avg_temperature": avg_temp})
+    else:
+        return jsonify({"error": "No temperature data found for the provided date range."}), 404
+
+# Debugging
 if __name__ == '__main__':
     app.run(debug=True)
